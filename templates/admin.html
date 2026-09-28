@@ -95,11 +95,19 @@
                             <h3 class="font-bold text-slate-200 text-sm">{{ product.name }}</h3>
                             <p class="text-xs text-slate-500 truncate max-w-xs">{{ product.description }}</p>
                         </div>
-                        <div class="text-right">
-                            <p class="font-extrabold text-emerald-400 text-sm mb-1">{{ product.price }} TL</p>
-                            <form action="/admin/product/delete/{{ product.id }}" method="POST" onsubmit="return confirm('Bu ürünü silmek istediğinize emin misiniz?');">
-                                <button type="submit" class="text-xs text-red-400 hover:text-red-300 font-semibold underline">Sil</button>
-                            </form>
+                        <div class="text-right flex items-center gap-3">
+                            <div>
+                                <p class="font-extrabold text-emerald-400 text-sm mb-1">{{ product.price }} TL</p>
+                                <div class="flex gap-2 justify-end">
+                                    <button onclick="openEditModal('{{ product.id }}', '{{ product.name|e }}', '{{ product.price }}', '{{ product.category }}', '{{ product.image_url|e }}', '{{ product.description|e }}')" 
+                                            class="text-xs text-amber-400 hover:text-amber-300 font-semibold underline">
+                                        Düzenle
+                                    </button>
+                                    <form action="/admin/product/delete/{{ product.id }}" method="POST" onsubmit="return confirm('Bu ürünü silmek istediğinize emin misiniz?');">
+                                        <button type="submit" class="text-xs text-red-400 hover:text-red-300 font-semibold underline">Sil</button>
+                                    </form>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
@@ -110,5 +118,80 @@
 
     </div>
 
+    <!-- Ürün Düzenleme Modalı -->
+    <div id="edit-modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                <h3 class="text-lg font-bold text-amber-400">Ürün Bilgilerini Düzenle</h3>
+                <button onclick="closeEditModal()" class="text-slate-400 hover:text-white font-bold text-2xl">&times;</button>
+            </div>
+
+            <form id="edit-product-form" method="POST" enctype="multipart/form-data" class="space-y-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1 font-semibold">Ürün Adı</label>
+                    <input type="text" id="edit-name" name="name" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1 font-semibold">Fiyat (TL)</label>
+                        <input type="number" step="0.5" id="edit-price" name="price" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1 font-semibold">Kategori</label>
+                        <select id="edit-category" name="category" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition">
+                            <option value="Ana Yemekler">Ana Yemekler</option>
+                            <option value="Salatalar">Salatalar</option>
+                            <option value="Atıştırmalıklar">Atıştırmalıklar</option>
+                            <option value="Tatlılar">Tatlılar</option>
+                            <option value="Sıcak İçecekler">Sıcak İçecekler</option>
+                            <option value="Soğuk İçecekler">Soğuk İçecekler</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="space-y-2 border-t border-slate-800/80 pt-3">
+                    <label class="block text-xs text-amber-400 font-semibold">Yeni Fotoğraf Yükle (İsteğe Bağlı)</label>
+                    <input type="file" name="image_file" accept="image/*" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-slate-300 focus:outline-none focus:border-amber-500 transition">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1 font-semibold">Veya Fotoğraf URL Bağlantısını Değiştir</label>
+                    <input type="url" id="edit-image-url" name="image_url" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1 font-semibold">Açıklama</label>
+                    <textarea id="edit-description" name="description" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition"></textarea>
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                    <button type="button" onclick="closeEditModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl transition text-xs">İptal</button>
+                    <button type="submit" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 rounded-xl transition shadow-lg text-xs">Değişiklikleri Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openEditModal(id, name, price, category, imageUrl, description) {
+            document.getElementById('edit-product-form').action = `/admin/product/update/${id}`;
+            document.getElementById('edit-name').value = name;
+            document.getElementById('edit-price').value = price;
+            document.getElementById('edit-category').value = category;
+            document.getElementById('edit-image-url').value = imageUrl;
+            document.getElementById('edit-description').value = description;
+
+            const modal = document.getElementById('edit-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEditModal() {
+            const modal = document.getElementById('edit-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+    </script>
 </body>
 </html>

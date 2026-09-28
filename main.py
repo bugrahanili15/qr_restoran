@@ -388,3 +388,37 @@ async def websocket_live(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+# --- Admin Ürün Güncelleme (Düzenleme) ---
+@app.post("/admin/product/update/{product_id}")
+async def update_product(
+    product_id: int,
+    name: str = Form(...),
+    price: float = Form(...),
+    category: str = Form(...),
+    image_url: Optional[str] = Form(None),
+    image_file: Optional[UploadFile] = File(None),
+    description: str = Form(""),
+    db: Session = Depends(get_db)
+):
+    prod = db.query(Product).filter(Product.id == product_id).first()
+    if not prod:
+        return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
+
+    prod.name = name
+    prod.price = price
+    prod.category = category
+    prod.description = description
+
+    # Yeni dosya yüklendi mi?
+    if image_file and image_file.filename:
+        filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{image_file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image_file.file, buffer)
+        prod.image_url = f"/static/uploads/{filename}"
+    elif image_url and image_url.strip():
+        prod.image_url = image_url.strip()
+
+    db.commit()
+    return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)       
