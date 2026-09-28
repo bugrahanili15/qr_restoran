@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Geçmiş Siparişler ve Günlük Raporlar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-slate-950 text-slate-100 p-6 min-h-screen">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- Üst Bar ve Navigasyon -->
+        <div class="flex justify-between items-center border-b border-slate-800 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-white">📊 Geçmiş Siparişler & Günlük Raporlar</h1>
+                <p class="text-xs text-slate-400 mt-0.5">Tarih Bazlı Sipariş ve Ciro Takibi</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/admin" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-400 font-semibold px-3.5 py-2 rounded-xl border border-slate-700 transition">
+                    Ürün Yönetimi
+                </a>
+                <a href="/kitchen" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-3.5 py-2 rounded-xl border border-slate-700 transition">
+                    Mutfak Paneli
+                </a>
+                <a href="/waiter" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-3.5 py-2 rounded-xl border border-slate-700 transition">
+                    Garson Paneli
+                </a>
+                <a href="/logout" class="text-xs bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white font-semibold px-3.5 py-2 rounded-xl transition border border-red-500/30">
+                    Çıkış
+                </a>
+            </div>
+        </div>
+
+        <!-- Gün Gün Gruplanmış Geçmiş Siparişler -->
+        {% if grouped_orders %}
+            {% for date_str, data in grouped_orders.items() %}
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+                <!-- Günlük Başlık ve Ciro Özeti -->
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <div>
+                        <h2 class="text-lg font-bold text-amber-400">{{ date_str }}</h2>
+                        <p class="text-xs text-slate-400">Toplam {{ data.orders|length }} Sipariş İşlendi</p>
+                    </div>
+                    <div class="text-right bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
+                        <span class="text-xs text-slate-400 block">Günlük Tahsil Edilen Ciro</span>
+                        <span class="text-xl font-extrabold text-emerald-400">{{ data.daily_total }} TL</span>
+                    </div>
+                </div>
+
+                <!-- O Güne Ait Sipariş Kartları -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {% for order in data.orders %}
+                    <div class="bg-slate-950 border border-slate-800/80 p-4 rounded-xl flex flex-col justify-between">
+                        <div>
+                            <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-2">
+                                <span class="font-bold text-amber-400 text-base">Masa {{ order.table_no }}</span>
+                                <span class="text-xs font-mono text-slate-400">Saat: {{ order.time_str }}</span>
+                            </div>
+
+                            <ul class="space-y-1 mb-3">
+                                {% for item in order.items %}
+                                <li class="text-xs flex justify-between text-slate-300">
+                                    <span>{{ item.product_name }}</span>
+                                    <span class="font-bold text-slate-400">x{{ item.quantity }}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+
+                        <div class="flex justify-between items-center border-t border-slate-800/80 pt-2 text-xs">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold 
+                                {% if order.status == 'Tamamı Ödendi' %} bg-emerald-500/20 text-emerald-400
+                                {% elif order.status == 'Teslim Edildi' %} bg-blue-500/20 text-blue-400
+                                {% else %} bg-slate-800 text-slate-400 {% endif %}">
+                                {{ order.status }}
+                            </span>
+                            <span class="font-extrabold text-amber-400 text-sm">{{ order.total_price }} TL</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="bg-slate-900 border border-slate-800 p-12 rounded-2xl text-center">
+                <p class="text-slate-400">Henüz tamamlanmış geçmiş sipariş bulunmuyor.</p>
+            </div>
+        {% endif %}
+
+    </div>
+
+</body>
+</html>

@@ -3,14 +3,19 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import shutil
 
 from database import SessionLocal, Product, Order, OrderItem, User, Base, engine
 
-# Veritabanı tablolarını garantiye al
+# Türkiye Saat Dilimi (UTC+3) Yardımcı Fonksiyonu
+TURKEY_TZ = timezone(timedelta(hours=3))
+
+def get_turkey_time():
+    return datetime.now(TURKEY_TZ)
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -149,7 +154,7 @@ def get_waiter(request: Request, db: Session = Depends(get_db)):
         return responses.RedirectResponse(url="/login")
 
     orders = db.query(Order).filter(Order.status == "Hazır").order_by(Order.id.desc()).all()
-    products = db.query(Product).all() # Garsonun hızlı sipariş alması için ürünler
+    products = db.query(Product).all()
     return templates.TemplateResponse(
         request=request, 
         name="waiter.html", 
@@ -169,6 +174,48 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
         context={"products": products, "user": user}
     )
 
+# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI ---
+@app.get("/admin/history")
+def get_order_history(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    if not user:
+        return responses.RedirectResponse(url="/login")
+
+    # Tüm tamamlanmış veya ödenmiş geçmiş siparişleri çek
+    history_orders = db.query(Order).order_by(Order.created_at.desc()).all()
+
+    # Gün gün gruplama yapısı
+    grouped_orders = {}
+    for order in history_orders:
+        # Türkiye Saati Biçimlendirmesi
+        created_time = order.created_at + timedelta(hours=3) if order.created_at else get_turkey_time()
+        date_str = created_time.strftime("%d.%m.%Y %A") # Örn: 28.09.2026 Pazartesi
+        
+        if date_str not in grouped_orders:
+            grouped_orders[date_str] = {
+                "orders": [],
+                "daily_total": 0.0
+            }
+        
+        order_info = {
+            "id": order.id,
+            "table_no": order.table_no,
+            "status": order.status,
+            "total_price": order.total_price,
+            "time_str": created_time.strftime("%H:%M"),
+            "items": order.items
+        }
+        
+        grouped_orders[date_str]["orders"].append(order_info)
+        if order.status in ["Tamamı Ödendi", "Teslim Edildi"]:
+            grouped_orders[date_str]["daily_total"] += order.total_price
+
+    return templates.TemplateResponse(
+        request=request,
+        name="history.html",
+        context={"grouped_orders": grouped_orders, "user": user}
+    )
+
 @app.post("/admin/product/add")
 async def add_product(
     name: str = Form(...),
@@ -182,7 +229,7 @@ async def add_product(
     final_image_url = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c"
 
     if image_file and image_file.filename:
-        filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{image_file.filename}"
+        filename = f"{get_turkey_time().strftime('%Y%m%d%H%M%S')}_{image_file.filename}"
         file_path = os.path.join(UPLOAD_DIR, filename)
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(image_file.file, buffer)
@@ -201,6 +248,38 @@ async def add_product(
     db.commit()
     return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
 
+@app.post("/admin/product/update/{product_id}")
+async def update_product(
+    product_id: int,
+    name: str = Form(...),
+    price: float = Form(...),
+    category: str = Form(...),
+    image_url: Optional[str] = Form(None),
+    image_file: Optional[UploadFile] = File(None),
+    description: str = Form(""),
+    db: Session = Depends(get_db)
+):
+    prod = db.query(Product).filter(Product.id == product_id).first()
+    if not prod:
+        return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
+
+    prod.name = name
+    prod.price = price
+    prod.category = category
+    prod.description = description
+
+    if image_file and image_file.filename:
+        filename = f"{get_turkey_time().strftime('%Y%m%d%H%M%S')}_{image_file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image_file.file, buffer)
+        prod.image_url = f"/static/uploads/{filename}"
+    elif image_url and image_url.strip():
+        prod.image_url = image_url.strip()
+
+    db.commit()
+    return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
+
 @app.post("/admin/product/delete/{product_id}")
 def delete_product(product_id: int, db: Session = Depends(get_db)):
     prod = db.query(Product).filter(Product.id == product_id).first()
@@ -216,7 +295,9 @@ async def create_order(data: dict, db: Session = Depends(get_db)):
 
     total_price = sum(float(item["price"]) * int(item["quantity"]) for item in cart)
 
-    new_order = Order(table_no=table_no, status="Yeni", total_price=total_price)
+    # Türkiye saati ile yeni sipariş
+    now_tr = get_turkey_time().replace(tzinfo=None)
+    new_order = Order(table_no=table_no, status="Yeni", total_price=total_price, created_at=now_tr)
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
@@ -243,14 +324,13 @@ async def create_order(data: dict, db: Session = Depends(get_db)):
         "table_no": table_no,
         "status": "Yeni",
         "total_price": total_price,
-        "created_at": new_order.created_at.strftime("%H:%M"),
+        "created_at": now_tr.strftime("%H:%M"),
         "items": items_summary
     }
     await manager.broadcast(order_data)
 
     return {"status": "success", "order_id": new_order.id}
 
-# --- ADİSYON SORGUSU (GARANTİ HATA KORUMALI) ---
 @app.get("/api/table/{table_no}/bill")
 def get_table_bill(table_no: int, db: Session = Depends(get_db)):
     try:
@@ -337,12 +417,11 @@ async def call_waiter(data: dict):
     event_data = {
         "event": "call_waiter",
         "table_no": table_no,
-        "time": datetime.now().strftime("%H:%M")
+        "time": get_turkey_time().strftime("%H:%M")
     }
     await manager.broadcast(event_data)
     return {"status": "success"}
 
-# --- MUTFAKTAN GARSONA CANLI SİPARİŞ AKTARIMI ---
 @app.post("/api/order/{order_id}/status")
 async def update_order_status(order_id: int, data: dict, db: Session = Depends(get_db)):
     new_status = data.get("status")
@@ -373,7 +452,7 @@ async def update_order_status(order_id: int, data: dict, db: Session = Depends(g
             "table_no": order.table_no,
             "status": new_status,
             "total_price": order.total_price,
-            "created_at": order.created_at.strftime("%H:%M"),
+            "created_at": order.created_at.strftime("%H:%M") if order.created_at else get_turkey_time().strftime("%H:%M"),
             "items": items_summary
         }
 
@@ -389,37 +468,3 @@ async def websocket_live(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-
-# --- Admin Ürün Güncelleme (Düzenleme) ---
-@app.post("/admin/product/update/{product_id}")
-async def update_product(
-    product_id: int,
-    name: str = Form(...),
-    price: float = Form(...),
-    category: str = Form(...),
-    image_url: Optional[str] = Form(None),
-    image_file: Optional[UploadFile] = File(None),
-    description: str = Form(""),
-    db: Session = Depends(get_db)
-):
-    prod = db.query(Product).filter(Product.id == product_id).first()
-    if not prod:
-        return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
-
-    prod.name = name
-    prod.price = price
-    prod.category = category
-    prod.description = description
-
-    # Yeni dosya yüklendi mi?
-    if image_file and image_file.filename:
-        filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{image_file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(image_file.file, buffer)
-        prod.image_url = f"/static/uploads/{filename}"
-    elif image_url and image_url.strip():
-        prod.image_url = image_url.strip()
-
-    db.commit()
-    return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)       
