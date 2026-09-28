@@ -35,8 +35,57 @@
     <!-- Garson Çağrıları -->
     <div id="waiter-calls-container" class="mb-6 space-y-2"></div>
 
+    <!-- HIZLI MASA SİPARİŞİ GİRİŞİ -->
+    <div class="bg-zinc-800 border border-zinc-700 p-4 rounded-2xl mb-8 shadow-lg">
+        <h2 class="text-base font-bold text-emerald-400 mb-3 flex items-center gap-2">
+            <span>⚡ Hızlı Masa Siparişi Al (Manuel Giriş)</span>
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+                <label class="block text-xs text-zinc-400 mb-1 font-semibold">Masa Seçin</label>
+                <select id="quick-table-select" class="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-2.5 text-sm font-bold text-amber-400 focus:outline-none focus:border-emerald-500">
+                    {% for t in range(1, 11) %}
+                    <option value="{{ t }}">Masa {{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="md:col-span-2">
+                <label class="block text-xs text-zinc-400 mb-1 font-semibold">Ürün Ekle (Dokunarak Seçin)</label>
+                <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1 bg-zinc-900/50 rounded-xl border border-zinc-700/60">
+                    {% for product in products %}
+                    <button data-name="{{ product.name }}" 
+                            data-price="{{ product.price }}" 
+                            onclick="addQuickItem(this)" 
+                            class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-zinc-200 text-xs px-3 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1.5">
+                        <span>{{ product.name }}</span>
+                        <span class="text-emerald-400 font-bold">({{ product.price }} TL)</span>
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div id="quick-cart-summary" class="hidden bg-zinc-900 p-3 rounded-xl border border-zinc-700/80 mb-3">
+            <div class="flex justify-between items-center mb-2 border-b border-zinc-800 pb-1.5">
+                <span class="text-xs text-zinc-400 font-semibold">Sipariş Özeti</span>
+                <button onclick="clearQuickCart()" class="text-[11px] text-red-400 hover:underline">Temizle</button>
+            </div>
+            <ul id="quick-cart-list" class="space-y-1 mb-2 text-xs"></ul>
+            <div class="flex justify-between items-center pt-2 border-t border-zinc-800">
+                <span class="text-xs text-zinc-400">Toplam:</span>
+                <span id="quick-cart-total" class="font-extrabold text-sm text-emerald-400">0 TL</span>
+            </div>
+        </div>
+
+        <button onclick="sendQuickOrder()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-sm transition shadow-md active:scale-95">
+            🚀 Siparişi Mutfağa İlet
+        </button>
+    </div>
+
     <!-- Masa Adisyonları Hızlı Kontrol -->
-    <h2 class="text-lg font-bold mb-3 text-amber-400 border-b border-zinc-800 pb-1">Masa Adisyon Kontrolü (Ayrı / Parçalı Ödeme)</h2>
+    <h2 class="text-lg font-bold mb-3 text-amber-400 border-b border-zinc-800 pb-1">Masa Adisyon Kontrolü (Ayrı / Parçalı / Tam Ödeme)</h2>
     <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
         {% for table_num in range(1, 11) %}
         <button data-table="{{ table_num }}" 
@@ -88,6 +137,14 @@
                 <button onclick="closeModal()" class="text-zinc-400 hover:text-white font-bold text-2xl">&times;</button>
             </div>
 
+            <!-- TEK TIKLA HESABIN TAMAMINI ÖDEME BUTONU -->
+            <button id="pay-all-bill-btn" 
+                    onclick="payFullBill()" 
+                    class="w-full mb-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition active:scale-95 flex items-center justify-center gap-2 border border-emerald-400/40">
+                <span>🎉 Hesabın Tamamını Öde</span>
+                <span id="full-bill-amount-text" class="bg-emerald-800 text-emerald-200 text-xs px-2.5 py-1 rounded-lg">0 TL</span>
+            </button>
+
             <!-- Kişi Sayısına Göre Hesabı Eşit Bölme Alanı -->
             <div class="bg-zinc-900/90 p-3 rounded-xl border border-zinc-700 mb-4">
                 <label class="block text-xs font-semibold text-amber-400 mb-2">÷ Hesabı Kişi Sayısına Böl</label>
@@ -114,9 +171,9 @@
                 </button>
             </div>
 
-            <p class="text-xs text-zinc-400 mb-2">Ürün bazlı parçalı ödeme seçimi:</p>
+            <p class="text-xs text-zinc-400 mb-2"> Veya ürün bazlı parçalı ödeme yapın:</p>
             
-            <div id="modal-bill-items" class="space-y-2 max-h-56 overflow-y-auto mb-4 border-b border-zinc-700 pb-3 pr-1"></div>
+            <div id="modal-bill-items" class="space-y-2 max-h-48 overflow-y-auto mb-4 border-b border-zinc-700 pb-3 pr-1"></div>
 
             <div class="space-y-1 mb-5 bg-zinc-900/60 p-3 rounded-xl border border-zinc-700/50">
                 <div class="flex justify-between items-center text-sm">
@@ -144,6 +201,77 @@
         let selectedPayCounts = {};
         let currentTotalRemaining = 0.0;
         let calculatedPerPersonPrice = 0.0;
+
+        let quickCart = [];
+
+        function addQuickItem(button) {
+            const name = button.getAttribute('data-name');
+            const price = parseFloat(button.getAttribute('data-price'));
+
+            let item = quickCart.find(i => i.name === name);
+            if (item) {
+                item.quantity += 1;
+            } else {
+                quickCart.push({ name: name, price: price, quantity: 1 });
+            }
+            updateQuickCartUI();
+        }
+
+        function updateQuickCartUI() {
+            const summaryBox = document.getElementById('quick-cart-summary');
+            const list = document.getElementById('quick-cart-list');
+            const totalText = document.getElementById('quick-cart-total');
+
+            if (quickCart.length === 0) {
+                summaryBox.classList.add('hidden');
+                return;
+            }
+
+            summaryBox.classList.remove('hidden');
+            list.innerHTML = '';
+
+            let total = 0;
+            quickCart.forEach((item, index) => {
+                total += item.price * item.quantity;
+                list.innerHTML += `
+                    <li class="flex justify-between items-center text-zinc-300">
+                        <span>${item.name} x${item.quantity}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-emerald-400">${item.price * item.quantity} TL</span>
+                            <button onclick="removeQuickItem(${index})" class="text-red-400 font-bold">×</button>
+                        </div>
+                    </li>`;
+            });
+
+            totalText.innerText = `${total} TL`;
+        }
+
+        function removeQuickItem(index) {
+            quickCart.splice(index, 1);
+            updateQuickCartUI();
+        }
+
+        function clearQuickCart() {
+            quickCart = [];
+            updateQuickCartUI();
+        }
+
+        async function sendQuickOrder() {
+            if (quickCart.length === 0) return alert("Lütfen en az 1 ürün seçin.");
+
+            const tableNo = parseInt(document.getElementById('quick-table-select').value, 10);
+
+            const response = await fetch('/api/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ table_no: tableNo, cart: quickCart })
+            });
+
+            if (response.ok) {
+                alert(`Masa ${tableNo} siparişi mutfağa başarıyla iletildi!`);
+                clearQuickCart();
+            }
+        }
 
         ws.onmessage = function(event) {
             try {
@@ -257,7 +385,17 @@
                 
                 activeItemsData = data.items || [];
                 currentTotalRemaining = data.total_remaining_bill || 0.0;
+
                 document.getElementById('modal-remaining-price').innerText = `${currentTotalRemaining} TL`;
+                document.getElementById('full-bill-amount-text').innerText = `${currentTotalRemaining} TL`;
+
+                // Borç yoksa tam ödeme butonunu pasife çek
+                const payAllBtn = document.getElementById('pay-all-bill-btn');
+                if (currentTotalRemaining <= 0) {
+                    payAllBtn.classList.add('opacity-50', 'pointer-events-none');
+                } else {
+                    payAllBtn.classList.remove('opacity-50', 'pointer-events-none');
+                }
 
                 renderModalItems();
                 calculateSelectedTotal();
@@ -266,11 +404,39 @@
                 console.error("Adisyon yüklenirken hata oluştu:", err);
                 document.getElementById('modal-bill-items').innerHTML = '<p class="text-zinc-500 text-sm text-center py-4">Bu masanın açık siparişi yok.</p>';
                 currentTotalRemaining = 0.0;
+                document.getElementById('full-bill-amount-text').innerText = `0 TL`;
                 calculateSplitAmount();
             }
         }
 
-        // Dinamik Kişi Sayısına Göre Bölme Hesaplayıcı
+        // TEK TIKLA TÜM HESABI ÖDEME
+        async function payFullBill() {
+            if (currentTotalRemaining <= 0) return;
+
+            if (!confirm(`Masa ${currentTableNo} için ${currentTotalRemaining} TL tutarındaki HESABIN TAMAMI tahsil edilsin mi?`)) return;
+
+            let payments = [];
+            activeItemsData.forEach(item => {
+                if (!item.is_fully_paid && item.unpaid_quantity > 0) {
+                    payments.push({ item_id: item.item_id, count: item.unpaid_quantity });
+                }
+            });
+
+            if (payments.length === 0) return;
+
+            const response = await fetch(`/api/table/${currentTableNo}/pay-items`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payments: payments })
+            });
+
+            const result = await response.json();
+            if (result.status === "success") {
+                alert(`🎉 Masa ${currentTableNo} hesabının tamamı ödendi ve masa kapatıldı!`);
+                closeModal();
+            }
+        }
+
         function calculateSplitAmount() {
             const splitInput = document.getElementById('split-count-input');
             let count = parseInt(splitInput.value) || 1;
@@ -290,7 +456,6 @@
             }
         }
 
-        // Tutar Bazlı (Kişi Başı Pay) Ödeme Gönderme
         async function submitSplitPayment() {
             if (calculatedPerPersonPrice <= 0) return;
 

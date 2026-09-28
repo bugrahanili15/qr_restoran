@@ -149,10 +149,11 @@ def get_waiter(request: Request, db: Session = Depends(get_db)):
         return responses.RedirectResponse(url="/login")
 
     orders = db.query(Order).filter(Order.status == "Hazır").order_by(Order.id.desc()).all()
+    products = db.query(Product).all() # Garsonun hızlı sipariş alması için ürünler
     return templates.TemplateResponse(
         request=request, 
         name="waiter.html", 
-        context={"orders": orders, "user": user}
+        context={"orders": orders, "user": user, "products": products}
     )
 
 @app.get("/admin")
