@@ -33,8 +33,14 @@
             </div>
         </div>
 
+        {% if error %}
+        <div class="bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-xl text-xs">
+            <strong>Sistem Hatası:</strong> {{ error }}
+        </div>
+        {% endif %}
+
         <!-- Gün Gün Gruplanmış Geçmiş Siparişler -->
-        {% if grouped_orders %}
+        {% if grouped_orders and grouped_orders.items()|length > 0 %}
             {% for date_str, data in grouped_orders.items() %}
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
                 <!-- Günlük Başlık ve Ciro Özeti -->
@@ -85,7 +91,7 @@
             {% endfor %}
         {% else %}
             <div class="bg-slate-900 border border-slate-800 p-12 rounded-2xl text-center">
-                <p class="text-slate-400">Henüz tamamlanmış geçmiş sipariş bulunmuyor.</p>
+                <p class="text-slate-400">Henüz tamamlanmış veya kayıtlı geçmiş sipariş bulunmuyor.</p>
             </div>
         {% endif %}
 

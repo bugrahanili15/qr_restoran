@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import shutil
+from sqlalchemy.orm import Session, joinedload
 
 from database import SessionLocal, Product, Order, OrderItem, User, Base, engine
 
@@ -174,8 +175,6 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
         context={"products": products, "user": user}
     )
 
-# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI ---
-# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI (HATA KORUMALI) ---
 @app.get("/admin/history")
 def get_order_history(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request)
@@ -183,12 +182,11 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
         return responses.RedirectResponse(url="/login")
 
     try:
-        # Tüm geçmiş siparişleri çek
-        history_orders = db.query(Order).order_by(Order.id.desc()).all()
+        # joinedload ile ürün detaylarını tek sorguda güvenle çekiyoruz
+        history_orders = db.query(Order).options(joinedload(Order.items)).order_by(Order.id.desc()).all()
 
         grouped_orders = {}
         for order in history_orders:
-            # Tarih güvenliği kontrolü
             if order.created_at:
                 created_time = order.created_at + timedelta(hours=3)
                 date_str = created_time.strftime("%d.%m.%Y")
@@ -203,7 +201,6 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
                     "daily_total": 0.0
                 }
             
-            # İlişkili elemanları güvenle listeye alıyoruz (Session kapanmadan)
             items_list = []
             if order.items:
                 for item in order.items:
@@ -238,6 +235,7 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
             name="history.html",
             context={"grouped_orders": {}, "user": user, "error": str(e)}
         )
+        
 
 @app.post("/admin/product/add")
 async def add_product(
