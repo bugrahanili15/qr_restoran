@@ -175,46 +175,69 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
     )
 
 # --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI ---
+# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI (HATA KORUMALI) ---
 @app.get("/admin/history")
 def get_order_history(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request)
     if not user:
         return responses.RedirectResponse(url="/login")
 
-    # Tüm tamamlanmış veya ödenmiş geçmiş siparişleri çek
-    history_orders = db.query(Order).order_by(Order.created_at.desc()).all()
+    try:
+        # Tüm geçmiş siparişleri çek
+        history_orders = db.query(Order).order_by(Order.id.desc()).all()
 
-    # Gün gün gruplama yapısı
-    grouped_orders = {}
-    for order in history_orders:
-        # Türkiye Saati Biçimlendirmesi
-        created_time = order.created_at + timedelta(hours=3) if order.created_at else get_turkey_time()
-        date_str = created_time.strftime("%d.%m.%Y %A") # Örn: 28.09.2026 Pazartesi
-        
-        if date_str not in grouped_orders:
-            grouped_orders[date_str] = {
-                "orders": [],
-                "daily_total": 0.0
+        grouped_orders = {}
+        for order in history_orders:
+            # Tarih güvenliği kontrolü
+            if order.created_at:
+                created_time = order.created_at + timedelta(hours=3)
+                date_str = created_time.strftime("%d.%m.%Y")
+                time_str = created_time.strftime("%H:%M")
+            else:
+                date_str = "Tarihsiz Kayıtlar"
+                time_str = "--:--"
+            
+            if date_str not in grouped_orders:
+                grouped_orders[date_str] = {
+                    "orders": [],
+                    "daily_total": 0.0
+                }
+            
+            # İlişkili elemanları güvenle listeye alıyoruz (Session kapanmadan)
+            items_list = []
+            if order.items:
+                for item in order.items:
+                    items_list.append({
+                        "product_name": item.product_name or "Ürün",
+                        "quantity": item.quantity or 1,
+                        "price": item.price or 0.0
+                    })
+
+            order_info = {
+                "id": order.id,
+                "table_no": order.table_no,
+                "status": order.status or "İşlendi",
+                "total_price": float(order.total_price or 0.0),
+                "time_str": time_str,
+                "items": items_list
             }
-        
-        order_info = {
-            "id": order.id,
-            "table_no": order.table_no,
-            "status": order.status,
-            "total_price": order.total_price,
-            "time_str": created_time.strftime("%H:%M"),
-            "items": order.items
-        }
-        
-        grouped_orders[date_str]["orders"].append(order_info)
-        if order.status in ["Tamamı Ödendi", "Teslim Edildi"]:
-            grouped_orders[date_str]["daily_total"] += order.total_price
+            
+            grouped_orders[date_str]["orders"].append(order_info)
+            if order.status in ["Tamamı Ödendi", "Teslim Edildi"]:
+                grouped_orders[date_str]["daily_total"] += float(order.total_price or 0.0)
 
-    return templates.TemplateResponse(
-        request=request,
-        name="history.html",
-        context={"grouped_orders": grouped_orders, "user": user}
-    )
+        return templates.TemplateResponse(
+            request=request,
+            name="history.html",
+            context={"grouped_orders": grouped_orders, "user": user}
+        )
+    except Exception as e:
+        print("History Okuma Hatasi:", e)
+        return templates.TemplateResponse(
+            request=request,
+            name="history.html",
+            context={"grouped_orders": {}, "user": user, "error": str(e)}
+        )
 
 @app.post("/admin/product/add")
 async def add_product(
