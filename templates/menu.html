@@ -112,7 +112,8 @@
         let cart = [];
         const tableNo = parseInt("{{ table_no }}", 10);
 
-        const ws = new WebSocket(`ws://${window.location.host}/ws/live`);
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`);
         ws.onmessage = function(event) {
             const data = JSON.parse(event.data);
             if (data.table_no === tableNo) {
