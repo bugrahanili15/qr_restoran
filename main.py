@@ -126,6 +126,42 @@ def logout():
     response = responses.RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
     response.delete_cookie("session_user")
     return response
+@app.post("/admin/update-credentials")
+def update_credentials(
+    request: Request,
+    new_username: str = Form(...),
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    current_user_name = get_current_user(request)
+    if not current_user_name:
+        return responses.RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    user = db.query(User).filter(User.username == current_user_name).first()
+    
+    # Mevcut şifre kontrolü
+    if not user or user.password != current_password:
+        products = db.query(Product).order_by(Product.id.desc()).all()
+        return templates.TemplateResponse(
+            request=request,
+            name="admin.html",
+            context={
+                "products": products,
+                "user": current_user_name,
+                "error_msg": "Mevcut şifreniz hatalı!"
+            }
+        )
+
+    # Kullanıcı adı ve şifre güncelleme
+    user.username = new_username.strip()
+    user.password = new_password.strip()
+    db.commit()
+
+    # Oturum çerezini yeni kullanıcı adıyla güncelle
+    response = responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
+    response.set_cookie(key="session_user", value=user.username, httponly=True)
+    return response
 
 @app.get("/menu/{table_no}")
 def get_menu(table_no: int, request: Request, db: Session = Depends(get_db)):
