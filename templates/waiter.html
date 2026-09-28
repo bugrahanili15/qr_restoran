@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🕺 Garson Teslimat & Masa Paneli</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-900 text-white p-4">
+    <div class="flex justify-between items-center mb-6 border-b border-zinc-700 pb-3">
+        <h1 class="text-2xl font-bold text-emerald-400">🕺 Garson Paneli</h1>
+        <span class="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs font-semibold">Servise Hazır</span>
+    <div class="flex items-center gap-3">
+    <span class="text-xs text-zinc-400">Giriş Yapan: <strong class="text-white">{{ user }}</strong></span>
+    <a href="/logout" class="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-3 py-1 rounded-lg text-xs font-bold transition">Çıkış Yap</a>
+</div>
+    </div>
+
+    <!-- Garson Çağrıları -->
+    <div id="waiter-calls-container" class="mb-6 space-y-2"></div>
+
+    <!-- Masa Adisyonları -->
+    <h2 class="text-lg font-bold mb-3 text-amber-400 border-b border-zinc-800 pb-1">Masa Adisyon Kontrolü (Ayrı / Parçalı Ödeme)</h2>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+        {% for table_num in range(1, 11) %}
+        <button data-table="{{ table_num }}" 
+                onclick="openTableModal(this)" 
+                class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 p-3 rounded-xl text-center shadow transition active:scale-95">
+            <p class="font-bold text-lg text-amber-400">Masa {{ table_num }}</p>
+            <p class="text-xs text-zinc-400">Adisyon Gör / Öde</p>
+        </button>
+        {% endfor %}
+    </div>
+
+    <!-- Mutfaktan Hazır Çıkan Siparişler -->
+    <h2 class="text-lg font-bold mb-3 text-zinc-400 border-b border-zinc-800 pb-1">Mutfaktan Çıkan Servisler</h2>
+    <div id="waiter-orders-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for order in orders %}
+        <div id="waiter-card-{{ order.id }}" class="bg-zinc-800 border-2 border-emerald-500 p-4 rounded-xl shadow flex flex-col justify-between">
+            <div>
+                <div class="flex justify-between items-center border-b border-zinc-700 pb-2 mb-2">
+                    <span class="font-extrabold text-xl text-emerald-400">Masa {{ order.table_no }}</span>
+                    <span class="bg-emerald-600 text-white text-xs px-2 py-0.5 rounded font-bold">MUTFAK HAZIRLADI</span>
+                </div>
+                <ul class="space-y-1 mb-3">
+                    {% for item in order.items %}
+                    <li class="text-sm flex justify-between">
+                        <span>{{ item.product_name }}</span>
+                        <span class="font-bold text-emerald-400">x{{ item.quantity }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <div class="text-right border-t border-zinc-700/50 pt-2 mb-3">
+                    <span class="text-xs text-zinc-400">Bu Servis Tutarı: </span>
+                    <span class="font-bold text-emerald-400 text-base">{{ order.total_price }} TL</span>
+                </div>
+            </div>
+            <button data-id="{{ order.id }}" 
+                    onclick="handleDeliverClick(this)" 
+                    class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg shadow active:scale-95 transition">
+                ✓ Masaya Teslim Edildi
+            </button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Adisyon Modalı -->
+    <div id="bill-modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center p-4 z-50">
+        <div class="bg-zinc-800 border border-zinc-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+            <div class="flex justify-between items-center border-b border-zinc-700 pb-3 mb-4">
+                <h3 id="modal-table-title" class="text-xl font-bold text-amber-400">Masa - Adisyon Detayı</h3>
+                <button onclick="closeModal()" class="text-zinc-400 hover:text-white font-bold text-2xl">&times;</button>
+            </div>
+            
+            <p class="text-xs text-zinc-400 mb-2">Ayrı ödemelerde ödenecek adedi + / - ile seçip onaylayın:</p>
+            
+            <div id="modal-bill-items" class="space-y-2 max-h-72 overflow-y-auto mb-4 border-b border-zinc-700 pb-3 pr-1"></div>
+
+            <div class="space-y-1 mb-6 bg-zinc-900/60 p-3 rounded-xl border border-zinc-700/50">
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-zinc-400">Şu An Seçilen Ödeme:</span>
+                    <span id="modal-selected-price" class="text-xl font-bold text-amber-400">0 TL</span>
+                </div>
+                <div class="flex justify-between items-center text-xs text-zinc-500">
+                    <span>Masa Kalan Borç:</span>
+                    <span id="modal-remaining-price" class="font-semibold text-zinc-300">0 TL</span>
+                </div>
+            </div>
+
+            <button id="modal-pay-selected-btn" onclick="submitPartialPayment()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-3 rounded-xl shadow transition">
+                💳 Seçilen Tutarı Öde
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws/live`);
+
+        let currentTableNo = null;
+        let activeItemsData = [];
+        let selectedPayCounts = {};
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.event === "status_update") {
+                if (data.status === "Hazır") {
+                    addWaiterCard(data);
+                    playWaiterBell();
+                } else if (data.status === "Teslim Edildi" || data.status === "Silindi") {
+                    removeWaiterCard(data.id);
+                }
+            } else if (data.event === "call_waiter") {
+                addWaiterCallAlert(data);
+                playCallBell();
+            }
+        };
+
+        function addWaiterCard(data) {
+            const container = document.getElementById('waiter-orders-container');
+            let itemsHtml = '';
+            data.items.forEach(function(item) {
+                itemsHtml += `<li class="text-sm flex justify-between"><span>${item.name}</span><span class="font-bold text-emerald-400">x${item.quantity}</span></li>`;
+            });
+
+            // animate-bounce kaldırıldı, kartlar statik ve sabit duracak
+            const cardHtml = `
+                <div id="waiter-card-${data.id}" class="bg-zinc-800 border-2 border-emerald-500 p-4 rounded-xl shadow flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-center border-b border-zinc-700 pb-2 mb-2">
+                            <span class="font-extrabold text-xl text-emerald-400">Masa ${data.table_no}</span>
+                            <span class="bg-emerald-600 text-white text-xs px-2 py-0.5 rounded font-bold">MUTFAK HAZIRLADI</span>
+                        </div>
+                        <ul class="space-y-1 mb-3">${itemsHtml}</ul>
+                        <div class="text-right border-t border-zinc-700/50 pt-2 mb-3">
+                            <span class="text-xs text-zinc-400">Bu Servis Tutarı: </span>
+                            <span class="font-bold text-emerald-400 text-base">${data.total_price} TL</span>
+                        </div>
+                    </div>
+                    <button data-id="${data.id}" onclick="handleDeliverClick(this)" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg shadow active:scale-95 transition">
+                        ✓ Masaya Teslim Edildi
+                    </button>
+                </div>`;
+            container.insertAdjacentHTML('afterbegin', cardHtml);
+        }
+
+        function addWaiterCallAlert(data) {
+            const container = document.getElementById('waiter-calls-container');
+            // animate-pulse kaldırıldı, statik ve net bir bildirim kutusu
+            const alertHtml = `
+                <div class="bg-amber-500 text-slate-950 font-bold p-4 rounded-xl flex justify-between items-center shadow-lg">
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">🔔</span>
+                        <div>
+                            <p class="text-lg">Masa ${data.table_no} HESAP / GARSON ÇAĞIRIYOR!</p>
+                            <p class="text-xs font-normal opacity-80">Saat: ${data.time}</p>
+                        </div>
+                    </div>
+                    <button onclick="this.parentElement.remove()" class="bg-slate-900 text-white text-xs px-3 py-1.5 rounded-lg font-bold">Tamamdır</button>
+                </div>`;
+            container.insertAdjacentHTML('afterbegin', alertHtml);
+        }
+
+        function removeWaiterCard(orderId) {
+            const card = document.getElementById(`waiter-card-${orderId}`);
+            if (card) card.remove();
+        }
+
+        function handleDeliverClick(button) {
+            const orderId = button.getAttribute('data-id');
+            deliverOrder(orderId);
+        }
+
+        async function deliverOrder(orderId) {
+            await fetch(`/api/order/${orderId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: "Teslim Edildi" })
+            });
+        }
+
+        // --- Adisyon İşlemleri ---
+        async function openTableModal(button) {
+            currentTableNo = button.getAttribute('data-table');
+            document.getElementById('modal-table-title').innerText = `Masa ${currentTableNo} - Adisyon Detayı`;
+            
+            selectedPayCounts = {};
+            await loadTableBillData();
+
+            document.getElementById('bill-modal').classList.remove('hidden');
+            document.getElementById('bill-modal').classList.add('flex');
+        }
+
+        async function loadTableBillData() {
+            const response = await fetch(`/api/table/${currentTableNo}/bill`);
+            const data = await response.json();
+            
+            activeItemsData = data.items;
+            document.getElementById('modal-remaining-price').innerText = `${data.total_remaining_bill} TL`;
+
+            renderModalItems();
+            calculateSelectedTotal();
+        }
+
+        function renderModalItems() {
+            const container = document.getElementById('modal-bill-items');
+            container.innerHTML = '';
+
+            if (!activeItemsData || activeItemsData.length === 0) {
+                container.innerHTML = '<p class="text-zinc-500 text-sm text-center py-4">Bu masanın açık siparişi yok.</p>';
+                return;
+            }
+
+            activeItemsData.forEach(function(item) {
+                const isPaid = item.is_fully_paid;
+                const payCount = selectedPayCounts[item.item_id] || 0;
+                const price = item.price || 0;
+
+                const textStyle = isPaid 
+                    ? "line-through opacity-40 italic text-zinc-500" 
+                    : "text-white font-semibold";
+
+                const badge = isPaid 
+                    ? `<span class="text-[10px] bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded ml-2">Tamamı Ödendi</span>` 
+                    : `<span class="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded ml-2">${item.paid_quantity}/${item.quantity} Ödendi</span>`;
+
+                container.innerHTML += `
+                    <div class="flex justify-between items-center bg-zinc-900/80 p-2.5 rounded-xl border border-zinc-700/60">
+                        <div class="flex-1">
+                            <div class="flex items-center">
+                                <span class="${textStyle} text-sm">${item.product_name}</span>
+                                ${badge}
+                            </div>
+                            <p class="text-xs text-zinc-400">${price} TL x ${item.quantity} Adet</p>
+                        </div>
+
+                        ${!isPaid ? `
+                        <div class="flex items-center gap-2 bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-700">
+                            <button onclick="changePayCount(${item.item_id}, -1,${item.unpaid_quantity})" class="w-6 h-6 bg-zinc-700 hover:bg-zinc-600 rounded font-bold text-amber-400 flex items-center justify-center">-</button>
+                            <span class="w-5 text-center font-bold text-sm text-amber-400">${payCount}</span>
+                            <button onclick="changePayCount(${item.item_id}, 1,${item.unpaid_quantity})" class="w-6 h-6 bg-zinc-700 hover:bg-zinc-600 rounded font-bold text-amber-400 flex items-center justify-center">+</button>
+                        </div>
+                        ` : `<span class="text-xs text-zinc-500 font-bold px-2">✓ Ödendi</span>`}
+                    </div>`;
+            });
+        }
+
+        function changePayCount(itemId, delta, maxUnpaid) {
+            let current = selectedPayCounts[itemId] || 0;
+            current += delta;
+            if (current < 0) current = 0;
+            if (current > maxUnpaid) current = maxUnpaid;
+
+            selectedPayCounts[itemId] = current;
+            renderModalItems();
+            calculateSelectedTotal();
+        }
+
+        function calculateSelectedTotal() {
+            let selectedTotal = 0;
+            activeItemsData.forEach(function(item) {
+                const count = selectedPayCounts[item.item_id] || 0;
+                const price = item.price || 0;
+                selectedTotal += count * price;
+            });
+            document.getElementById('modal-selected-price').innerText = `${selectedTotal} TL`;
+        }
+
+        async function submitPartialPayment() {
+            let payments = [];
+            for (let itemId in selectedPayCounts) {
+                if (selectedPayCounts[itemId] > 0) {
+                    payments.push({ item_id: parseInt(itemId), count: selectedPayCounts[itemId] });
+                }
+            }
+
+            if (payments.length === 0) {
+                alert("Ödeme almak için en az 1 ürünün miktarını (+) ile seçin.");
+                return;
+            }
+
+            const response = await fetch(`/api/table/${currentTableNo}/pay-items`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payments: payments })
+            });
+
+            const result = await response.json();
+            if (result.status === "success") {
+                if (result.all_done) {
+                    alert(`🎉 Masa ${currentTableNo} hesabının tamamı ödendi! Masa kapatıldı.`);
+                    closeModal();
+                } else {
+                    alert("Seçilen tutar ödendi ve adisyondan düşüldü!");
+                    selectedPayCounts = {};
+                    await loadTableBillData();
+                }
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('bill-modal').classList.add('hidden');
+            document.getElementById('bill-modal').classList.remove('flex');
+        }
+
+        function playWaiterBell() {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            osc.connect(ctx.destination);
+            osc.frequency.value = 900;
+            osc.start();
+            osc.stop(ctx.currentTime + 0.5);
+        }
+
+        function playCallBell() {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            osc.connect(ctx.destination);
+            osc.frequency.value = 1200;
+            osc.start();
+            osc.stop(ctx.currentTime + 0.8);
+        }
+    </script>
+</body>
+</html>
