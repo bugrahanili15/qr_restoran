@@ -87,14 +87,40 @@
                 <h3 id="modal-table-title" class="text-xl font-bold text-amber-400">Masa - Adisyon Detayı</h3>
                 <button onclick="closeModal()" class="text-zinc-400 hover:text-white font-bold text-2xl">&times;</button>
             </div>
-            
-            <p class="text-xs text-zinc-400 mb-2">Ayrı ödemelerde ödenecek adedi + / - ile seçip onaylayın:</p>
-            
-            <div id="modal-bill-items" class="space-y-2 max-h-72 overflow-y-auto mb-4 border-b border-zinc-700 pb-3 pr-1"></div>
 
-            <div class="space-y-1 mb-6 bg-zinc-900/60 p-3 rounded-xl border border-zinc-700/50">
+            <!-- Kişi Sayısına Göre Hesabı Eşit Bölme Alanı -->
+            <div class="bg-zinc-900/90 p-3 rounded-xl border border-zinc-700 mb-4">
+                <label class="block text-xs font-semibold text-amber-400 mb-2">÷ Hesabı Kişi Sayısına Böl</label>
+                <div class="flex items-center gap-2">
+                    <span class="text-lg font-bold text-zinc-400">÷</span>
+                    <input type="number" 
+                           id="split-count-input" 
+                           min="1" 
+                           value="1" 
+                           oninput="calculateSplitAmount()" 
+                           placeholder="Kişi sayısı" 
+                           class="w-24 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-1.5 text-white font-bold text-center text-sm focus:outline-none focus:border-amber-500">
+                    <span class="text-xs text-zinc-400">Kişi</span>
+                    
+                    <div class="flex-1 text-right">
+                        <span class="text-xs text-zinc-400 block">Kişi Başı Tutar:</span>
+                        <span id="split-per-person-price" class="text-base font-extrabold text-emerald-400">0 TL</span>
+                    </div>
+                </div>
+                <button id="pay-split-btn" 
+                        onclick="submitSplitPayment()" 
+                        class="w-full mt-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded-lg transition hidden">
+                    💳 Kişi Başı Payı Öde (1 Kişilik Tutar Düş)
+                </button>
+            </div>
+
+            <p class="text-xs text-zinc-400 mb-2">Ürün bazlı parçalı ödeme seçimi:</p>
+            
+            <div id="modal-bill-items" class="space-y-2 max-h-56 overflow-y-auto mb-4 border-b border-zinc-700 pb-3 pr-1"></div>
+
+            <div class="space-y-1 mb-5 bg-zinc-900/60 p-3 rounded-xl border border-zinc-700/50">
                 <div class="flex justify-between items-center text-sm">
-                    <span class="text-zinc-400">Şu An Seçilen Ödeme:</span>
+                    <span class="text-zinc-400">Seçilen Ürün Ödemesi:</span>
                     <span id="modal-selected-price" class="text-xl font-bold text-amber-400">0 TL</span>
                 </div>
                 <div class="flex justify-between items-center text-xs text-zinc-500">
@@ -104,7 +130,7 @@
             </div>
 
             <button id="modal-pay-selected-btn" onclick="submitPartialPayment()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-3 rounded-xl shadow transition">
-                💳 Seçilen Tutarı Öde
+                💳 Seçilen Ürün Tutarlarını Öde
             </button>
         </div>
     </div>
@@ -116,6 +142,8 @@
         let currentTableNo = null;
         let activeItemsData = [];
         let selectedPayCounts = {};
+        let currentTotalRemaining = 0.0;
+        let calculatedPerPersonPrice = 0.0;
 
         ws.onmessage = function(event) {
             try {
@@ -130,6 +158,8 @@
                 } else if (data.event === "call_waiter") {
                     addWaiterCallAlert(data);
                     playCallBell();
+                } else if (data.event === "bill_updated" && data.table_no == currentTableNo) {
+                    loadTableBillData();
                 }
             } catch(e) {
                 console.error("WS Parse Hata:", e);
@@ -138,7 +168,7 @@
 
         function addWaiterCard(data) {
             if (!data || !data.id) return;
-            removeWaiterCard(data.id); // Varsa eski kartı kaldır
+            removeWaiterCard(data.id);
 
             const container = document.getElementById('waiter-orders-container');
             let itemsHtml = '';
@@ -203,14 +233,14 @@
             });
         }
 
-        // --- Adisyon İşlemleri (Garanti Açılan Modal) ---
+        // --- Adisyon İşlemleri ---
         async function openTableModal(button) {
             currentTableNo = button.getAttribute('data-table');
             document.getElementById('modal-table-title').innerText = `Masa ${currentTableNo} - Adisyon Detayı`;
             
             selectedPayCounts = {};
+            document.getElementById('split-count-input').value = 1;
             
-            // Modal'ı hemen görünür kıl
             const modal = document.getElementById('bill-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
@@ -226,13 +256,85 @@
                 const data = await response.json();
                 
                 activeItemsData = data.items || [];
-                document.getElementById('modal-remaining-price').innerText = `${data.total_remaining_bill || 0} TL`;
+                currentTotalRemaining = data.total_remaining_bill || 0.0;
+                document.getElementById('modal-remaining-price').innerText = `${currentTotalRemaining} TL`;
 
                 renderModalItems();
                 calculateSelectedTotal();
+                calculateSplitAmount();
             } catch (err) {
                 console.error("Adisyon yüklenirken hata oluştu:", err);
                 document.getElementById('modal-bill-items').innerHTML = '<p class="text-zinc-500 text-sm text-center py-4">Bu masanın açık siparişi yok.</p>';
+                currentTotalRemaining = 0.0;
+                calculateSplitAmount();
+            }
+        }
+
+        // Dinamik Kişi Sayısına Göre Bölme Hesaplayıcı
+        function calculateSplitAmount() {
+            const splitInput = document.getElementById('split-count-input');
+            let count = parseInt(splitInput.value) || 1;
+            if (count < 1) count = 1;
+
+            if (currentTotalRemaining > 0 && count > 1) {
+                calculatedPerPersonPrice = (currentTotalRemaining / count).toFixed(2);
+                document.getElementById('split-per-person-price').innerText = `${calculatedPerPersonPrice} TL`;
+                document.getElementById('pay-split-btn').innerText = `💳 Kişi Başı ${calculatedPerPersonPrice} TL Öde (1/${count} Pay)`;
+                document.getElementById('pay-split-btn').classList.remove('hidden');
+            } else if (currentTotalRemaining > 0) {
+                document.getElementById('split-per-person-price').innerText = `${currentTotalRemaining} TL`;
+                document.getElementById('pay-split-btn').classList.add('hidden');
+            } else {
+                document.getElementById('split-per-person-price').innerText = `0 TL`;
+                document.getElementById('pay-split-btn').classList.add('hidden');
+            }
+        }
+
+        // Tutar Bazlı (Kişi Başı Pay) Ödeme Gönderme
+        async function submitSplitPayment() {
+            if (calculatedPerPersonPrice <= 0) return;
+
+            if (!confirm(`Kişi başı düşen ${calculatedPerPersonPrice} TL tutarındaki ödeme alınsın mı?`)) return;
+
+            let remainingToDeduct = parseFloat(calculatedPerPersonPrice);
+            let payments = [];
+
+            for (let item of activeItemsData) {
+                if (remainingToDeduct <= 0) break;
+                if (item.is_fully_paid) continue;
+
+                let unpaidQty = item.unpaid_quantity;
+                let itemUnitPrice = item.price;
+
+                for (let q = 0; q < unpaidQty; q++) {
+                    if (remainingToDeduct <= 0) break;
+
+                    let existing = payments.find(p => p.item_id === item.item_id);
+                    if (existing) {
+                        existing.count += 1;
+                    } else {
+                        payments.push({ item_id: item.item_id, count: 1 });
+                    }
+                    remainingToDeduct -= itemUnitPrice;
+                }
+            }
+
+            if (payments.length === 0) {
+                alert("Ödenecek aktif ürün bulunamadı.");
+                return;
+            }
+
+            const response = await fetch(`/api/table/${currentTableNo}/pay-items`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payments: payments })
+            });
+
+            const result = await response.json();
+            if (result.status === "success") {
+                alert("Kişi başı pay ödemesi düşüldü!");
+                document.getElementById('split-count-input').value = 1;
+                await loadTableBillData();
             }
         }
 
