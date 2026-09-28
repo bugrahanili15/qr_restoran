@@ -175,6 +175,7 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
         context={"products": products, "user": user}
     )
 
+# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI (JINJA UYUMLU FİX) ---
 @app.get("/admin/history")
 def get_order_history(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request)
@@ -182,10 +183,10 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
         return responses.RedirectResponse(url="/login")
 
     try:
-        # joinedload ile ürün detaylarını tek sorguda güvenle çekiyoruz
+        # Tüm siparişleri eager loading ile çekiyoruz
         history_orders = db.query(Order).options(joinedload(Order.items)).order_by(Order.id.desc()).all()
 
-        grouped_orders = {}
+        grouped_dict = {}
         for order in history_orders:
             if order.created_at:
                 created_time = order.created_at + timedelta(hours=3)
@@ -195,8 +196,9 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
                 date_str = "Tarihsiz Kayıtlar"
                 time_str = "--:--"
             
-            if date_str not in grouped_orders:
-                grouped_orders[date_str] = {
+            if date_str not in grouped_dict:
+                grouped_dict[date_str] = {
+                    "date": date_str,
                     "orders": [],
                     "daily_total": 0.0
                 }
@@ -219,24 +221,25 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
                 "items": items_list
             }
             
-            grouped_orders[date_str]["orders"].append(order_info)
+            grouped_dict[date_str]["orders"].append(order_info)
             if order.status in ["Tamamı Ödendi", "Teslim Edildi"]:
-                grouped_orders[date_str]["daily_total"] += float(order.total_price or 0.0)
+                grouped_dict[date_str]["daily_total"] += float(order.total_price or 0.0)
+
+        # Dictionary'i Jinja2 çakışmasını engellemek için doğrudan Listeye çeviriyoruz
+        history_list = list(grouped_dict.values())
 
         return templates.TemplateResponse(
             request=request,
             name="history.html",
-            context={"grouped_orders": grouped_orders, "user": user}
+            context={"history_list": history_list, "user": user}
         )
     except Exception as e:
         print("History Okuma Hatasi:", e)
         return templates.TemplateResponse(
             request=request,
             name="history.html",
-            context={"grouped_orders": {}, "user": user, "error": str(e)}
+            context={"history_list": [], "user": user, "error": str(e)}
         )
-        
-
 @app.post("/admin/product/add")
 async def add_product(
     name: str = Form(...),
