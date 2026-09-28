@@ -51,7 +51,18 @@ manager = ConnectionManager()
 # --- Başlangıç Verileri ---
 @app.on_event("startup")
 def startup_db():
+    # Canlıda eski veritabanı yapısından kalan hataları temizlemek için:
+    # Eğer restoran.db varsa ve eski formatta kalmışsa silip temiz baştan kurmasını sağlıyoruz
     db = SessionLocal()
+    try:
+        # Test sorgusu yapıyoruz
+        db.query(OrderItem).first()
+    except Exception:
+        db.close()
+        if os.path.exists("restoran.db"):
+            os.remove("restoran.db")
+        db = SessionLocal()
+
     if not db.query(User).filter(User.username == "admin").first():
         admin_user = User(username="admin", password="admin123", role="superuser")
         db.add(admin_user)
