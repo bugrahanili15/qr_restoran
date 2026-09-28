@@ -1,12 +1,15 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, Form, File, UploadFile, responses, status
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import json
 import os
 import shutil
+import io
+import csv
 
 from database import SessionLocal, Product, Order, OrderItem, User, Base, engine
 
@@ -142,7 +145,6 @@ def get_kitchen(request: Request, db: Session = Depends(get_db)):
     
     orders = db.query(Order).filter(Order.status == "Yeni").order_by(Order.id.desc()).all()
     
-    # Aktif hesabı/siparişi olan masaları buluyoruz
     active_orders = db.query(Order.table_no).filter(
         Order.status.in_(["Yeni", "Hazır", "Teslim Edildi"])
     ).all()
@@ -163,7 +165,6 @@ def get_waiter(request: Request, db: Session = Depends(get_db)):
     orders = db.query(Order).filter(Order.status == "Hazır").order_by(Order.id.desc()).all()
     products = db.query(Product).all()
 
-    # Aktif hesabı/siparişi olan masaları buluyoruz
     active_orders = db.query(Order.table_no).filter(
         Order.status.in_(["Yeni", "Hazır", "Teslim Edildi"])
     ).all()
@@ -188,7 +189,7 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
         context={"products": products, "user": user}
     )
 
-# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI (JINJA UYUMLU KESİN ÇÖZÜM) ---
+# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI ---
 @app.get("/admin/history")
 def get_order_history(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request)
@@ -253,6 +254,47 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
             name="history.html",
             context={"history_list": [], "user": user, "error": str(e)}
         )
+
+# --- GEÇMİŞ SİPARİŞLERİ EXCEL / CSV OLARAK İNDİRME ---
+@app.get("/admin/export-excel")
+def export_orders_to_excel(db: Session = Depends(get_db)):
+    all_orders = db.query(Order).order_by(Order.id.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';')
+
+    writer.writerow(["Siparis ID", "Tarih", "Saat", "Masa No", "Urunler", "Toplam Tutar (TL)", "Durum"])
+
+    for order in all_orders:
+        if order.created_at:
+            created_time = order.created_at + timedelta(hours=3)
+            date_str = created_time.strftime("%d.%m.%Y")
+            time_str = created_time.strftime("%H:%M")
+        else:
+            date_str = "Tarihsiz"
+            time_str = "--:--"
+
+        items_str = ", ".join([f"{item.product_name} (x{item.quantity})" for item in order.items])
+
+        writer.writerow([
+            order.id,
+            date_str,
+            time_str,
+            f"Masa {order.table_no}",
+            items_str,
+            str(order.total_price).replace('.', ','),
+            order.status
+        ])
+
+    output.seek(0)
+    
+    filename = f"gecmis_siparisler_{get_turkey_time().strftime('%Y%m%d_%H%M')}.csv"
+    
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8-sig')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.post("/admin/product/add")
 async def add_product(
