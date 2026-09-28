@@ -33,16 +33,26 @@
     </div>
 
     <!-- Masa Adisyonları Hızlı Kasa Kontrolü -->
+   <!-- Masa Adisyonları Hızlı Kasa Kontrolü -->
     <h2 class="text-base font-bold mb-3 text-amber-400 border-b border-zinc-800 pb-1 flex items-center gap-2">
         <span>💳 Kasa Masa Adisyon Kontrolü (Doğrudan Ödeme Al)</span>
     </h2>
     <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
         {% for table_num in range(1, 11) %}
+        {% set is_active = table_num in active_tables %}
         <button data-table="{{ table_num }}" 
                 onclick="openTableModal(this)" 
-                class="bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 p-3 rounded-xl text-center shadow transition active:scale-95">
-            <p class="font-bold text-base text-amber-400">Masa {{ table_num }}</p>
-            <p class="text-xs text-zinc-500">Kasa / Hesabı Gör</p>
+                class="{% if is_active %}bg-emerald-950/80 border-2 border-emerald-500 text-emerald-300 shadow-emerald-900/30{% else %}bg-zinc-900 border border-zinc-800 text-zinc-400{% endif %} p-3 rounded-xl text-center shadow transition active:scale-95 relative">
+            {% if is_active %}
+            <span class="absolute top-2 right-2 flex h-2.5 w-2.5">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            {% endif %}
+            <p class="font-bold text-base {% if is_active %}text-emerald-400{% else %}text-amber-400{% endif %}">Masa {{ table_num }}</p>
+            <p class="text-xs {% if is_active %}text-emerald-300/80 font-semibold{% else %}text-zinc-500{% endif %}">
+                {% if is_active %}● Masa Dolu{% else %}Masa Boş{% endif %}
+            </p>
         </button>
         {% endfor %}
     </div>

@@ -141,10 +141,17 @@ def get_kitchen(request: Request, db: Session = Depends(get_db)):
         return responses.RedirectResponse(url="/login")
     
     orders = db.query(Order).filter(Order.status == "Yeni").order_by(Order.id.desc()).all()
+    
+    # Aktif hesabı/siparişi olan masaları buluyoruz
+    active_orders = db.query(Order.table_no).filter(
+        Order.status.in_(["Yeni", "Hazır", "Teslim Edildi"])
+    ).all()
+    active_tables = list(set([o.table_no for o in active_orders]))
+
     return templates.TemplateResponse(
         request=request, 
         name="kitchen.html", 
-        context={"orders": orders, "user": user}
+        context={"orders": orders, "user": user, "active_tables": active_tables}
     )
 
 @app.get("/waiter")
@@ -155,10 +162,17 @@ def get_waiter(request: Request, db: Session = Depends(get_db)):
 
     orders = db.query(Order).filter(Order.status == "Hazır").order_by(Order.id.desc()).all()
     products = db.query(Product).all()
+
+    # Aktif hesabı/siparişi olan masaları buluyoruz
+    active_orders = db.query(Order.table_no).filter(
+        Order.status.in_(["Yeni", "Hazır", "Teslim Edildi"])
+    ).all()
+    active_tables = list(set([o.table_no for o in active_orders]))
+
     return templates.TemplateResponse(
         request=request, 
         name="waiter.html", 
-        context={"orders": orders, "user": user, "products": products}
+        context={"orders": orders, "user": user, "products": products, "active_tables": active_tables}
     )
 
 @app.get("/admin")
