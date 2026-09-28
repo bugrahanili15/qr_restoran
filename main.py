@@ -8,11 +8,13 @@ import json
 import os
 import shutil
 
-from database import SessionLocal, Product, Order, OrderItem, User
+from database import SessionLocal, Product, Order, OrderItem, User, Base, engine
+
+# Veritabanı tablolarını garantiye al
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Yüklenen görseller için statik klasör tanımı
 UPLOAD_DIR = "static/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -26,7 +28,6 @@ def get_db():
     finally:
         db.close()
 
-# --- WebSocket Yöneticisi ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -40,73 +41,64 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        for connection in list(self.active_connections):
             try:
                 await connection.send_text(json.dumps(message))
             except Exception:
-                pass
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
-# --- Başlangıç Verileri ---
 @app.on_event("startup")
 def startup_db():
-    # Canlıda eski veritabanı yapısından kalan hataları temizlemek için:
-    # Eğer restoran.db varsa ve eski formatta kalmışsa silip temiz baştan kurmasını sağlıyoruz
     db = SessionLocal()
     try:
-        # Test sorgusu yapıyoruz
-        db.query(OrderItem).first()
-    except Exception:
+        if not db.query(User).filter(User.username == "admin").first():
+            admin_user = User(username="admin", password="admin123", role="superuser")
+            db.add(admin_user)
+            db.commit()
+
+        if not db.query(Product).first():
+            sample_products = [
+                Product(
+                    name="Izgara Köfte", 
+                    price=280.0, 
+                    category="Ana Yemekler",
+                    image_url="https://images.unsplash.com/photo-1529042410759-befb1204b468?w=500",
+                    description="Özel baharatlarla harmanlanmış 200gr ızgara dana köfte, patates püre ve közlenmiş biber ile."
+                ),
+                Product(
+                    name="Cheeseburger", 
+                    price=260.0, 
+                    category="Ana Yemekler",
+                    image_url="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500",
+                    description="180gr dana hamburger köftesi, cheddar peyniri, karamelize soğan, özel sos ve çıtır patates."
+                ),
+                Product(
+                    name="San Sebastian", 
+                    price=150.0, 
+                    category="Tatlılar",
+                    image_url="https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=500",
+                    description="Akışkan Belçika çikolatası sosu ile servis edilen orijinal fırınlanmış cheesecake."
+                ),
+                Product(
+                    name="Caffè Latte", 
+                    price=85.0, 
+                    category="Sıcak İçecekler",
+                    image_url="https://images.unsplash.com/photo-1534778101976-62847782c213?w=500",
+                    description="Taze çekilmiş espresso çekirdekleri ve kadifemsi süt köpüğü."
+                ),
+            ]
+            db.add_all(sample_products)
+            db.commit()
+    except Exception as e:
+        print("Startup hata:", e)
+    finally:
         db.close()
-        if os.path.exists("restoran.db"):
-            os.remove("restoran.db")
-        db = SessionLocal()
-
-    if not db.query(User).filter(User.username == "admin").first():
-        admin_user = User(username="admin", password="admin123", role="superuser")
-        db.add(admin_user)
-        db.commit()
-
-    if not db.query(Product).first():
-        sample_products = [
-            Product(
-                name="Izgara Köfte", 
-                price=280.0, 
-                category="Ana Yemekler",
-                image_url="https://images.unsplash.com/photo-1529042410759-befb1204b468?w=500",
-                description="Özel baharatlarla harmanlanmış 200gr ızgara dana köfte, patates püre ve közlenmiş biber ile."
-            ),
-            Product(
-                name="Cheeseburger", 
-                price=260.0, 
-                category="Ana Yemekler",
-                image_url="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500",
-                description="180gr dana hamburger köftesi, cheddar peyniri, karamelize soğan, özel sos ve çıtır patates."
-            ),
-            Product(
-                name="San Sebastian", 
-                price=150.0, 
-                category="Tatlılar",
-                image_url="https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=500",
-                description="Akışkan Belçika çikolatası sosu ile servis edilen orijinal fırınlanmış cheesecake."
-            ),
-            Product(
-                name="Caffè Latte", 
-                price=85.0, 
-                category="Sıcak İçecekler",
-                image_url="https://images.unsplash.com/photo-1534778101976-62847782c213?w=500",
-                description="Taze çekilmiş espresso çekirdekleri ve kadifemsi süt köpüğü."
-            ),
-        ]
-        db.add_all(sample_products)
-        db.commit()
-    db.close()
 
 def get_current_user(request: Request):
     return request.cookies.get("session_user")
 
-# --- Auth ---
 @app.get("/login")
 def login_page(request: Request):
     return templates.TemplateResponse(request=request, name="login.html", context={})
@@ -127,7 +119,6 @@ def logout():
     response.delete_cookie("session_user")
     return response
 
-# --- Sayfalar ---
 @app.get("/menu/{table_no}")
 def get_menu(table_no: int, request: Request, db: Session = Depends(get_db)):
     products = db.query(Product).all()
@@ -177,7 +168,6 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
         context={"products": products, "user": user}
     )
 
-# --- Admin Ürün Ekleme (Dosya Yükleme Destekli) ---
 @app.post("/admin/product/add")
 async def add_product(
     name: str = Form(...),
@@ -190,15 +180,11 @@ async def add_product(
 ):
     final_image_url = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c"
 
-    # Eğer bilgisayardan dosya yüklenmişse
     if image_file and image_file.filename:
-        file_ext = os.path.splitext(image_file.filename)[1]
         filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{image_file.filename}"
         file_path = os.path.join(UPLOAD_DIR, filename)
-        
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(image_file.file, buffer)
-        
         final_image_url = f"/static/uploads/{filename}"
     elif image_url and image_url.strip():
         final_image_url = image_url.strip()
@@ -222,11 +208,10 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
         db.commit()
     return responses.RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
 
-# --- API Endpoints ---
 @app.post("/api/order")
 async def create_order(data: dict, db: Session = Depends(get_db)):
     table_no = data.get("table_no")
-    cart = data.get("cart")
+    cart = data.get("cart", [])
 
     total_price = sum(float(item["price"]) * int(item["quantity"]) for item in cart)
 
@@ -264,43 +249,52 @@ async def create_order(data: dict, db: Session = Depends(get_db)):
 
     return {"status": "success", "order_id": new_order.id}
 
+# --- ADİSYON SORGUSU (GARANTİ HATA KORUMALI) ---
 @app.get("/api/table/{table_no}/bill")
 def get_table_bill(table_no: int, db: Session = Depends(get_db)):
-    active_orders = db.query(Order).filter(
-        Order.table_no == table_no, 
-        Order.status.in_(["Yeni", "Hazır", "Teslim Edildi"])
-    ).all()
+    try:
+        active_orders = db.query(Order).filter(
+            Order.table_no == table_no, 
+            Order.status.in_(["Yeni", "Hazır", "Teslim Edildi"])
+        ).all()
 
-    all_items = []
-    total_remaining_bill = 0.0
+        all_items = []
+        total_remaining_bill = 0.0
 
-    for order in active_orders:
-        for item in order.items:
-            price = float(item.price or 0.0)
-            qty = int(item.quantity or 0)
-            paid_qty = int(item.paid_quantity or 0)
-            unpaid_qty = qty - paid_qty
-            
-            if unpaid_qty < 0:
-                unpaid_qty = 0
+        for order in active_orders:
+            for item in order.items:
+                price = float(item.price if item.price is not None else 0.0)
+                qty = int(item.quantity if item.quantity is not None else 0)
+                paid_qty = int(item.paid_quantity if item.paid_quantity is not None else 0)
+                unpaid_qty = qty - paid_qty
+                
+                if unpaid_qty < 0:
+                    unpaid_qty = 0
 
-            total_remaining_bill += unpaid_qty * price
-            
-            all_items.append({
-                "item_id": item.id,
-                "product_name": item.product_name,
-                "price": price,
-                "quantity": qty,
-                "paid_quantity": paid_qty,
-                "unpaid_quantity": unpaid_qty,
-                "is_fully_paid": unpaid_qty == 0
-            })
+                total_remaining_bill += unpaid_qty * price
+                
+                all_items.append({
+                    "item_id": item.id,
+                    "product_name": item.product_name or "Ürün",
+                    "price": price,
+                    "quantity": qty,
+                    "paid_quantity": paid_qty,
+                    "unpaid_quantity": unpaid_qty,
+                    "is_fully_paid": unpaid_qty == 0
+                })
 
-    return {
-        "table_no": table_no,
-        "total_remaining_bill": total_remaining_bill,
-        "items": all_items
-    }
+        return {
+            "table_no": table_no,
+            "total_remaining_bill": total_remaining_bill,
+            "items": all_items
+        }
+    except Exception as e:
+        print("Adisyon okuma hatasi:", e)
+        return {
+            "table_no": table_no,
+            "total_remaining_bill": 0.0,
+            "items": []
+        }
 
 @app.post("/api/table/{table_no}/pay-items")
 async def pay_table_items(table_no: int, data: dict, db: Session = Depends(get_db)):
@@ -347,6 +341,7 @@ async def call_waiter(data: dict):
     await manager.broadcast(event_data)
     return {"status": "success"}
 
+# --- MUTFAKTAN GARSONA CANLI SİPARİŞ AKTARIMI ---
 @app.post("/api/order/{order_id}/status")
 async def update_order_status(order_id: int, data: dict, db: Session = Depends(get_db)):
     new_status = data.get("status")
@@ -359,21 +354,28 @@ async def update_order_status(order_id: int, data: dict, db: Session = Depends(g
         db.query(OrderItem).filter(OrderItem.order_id == order_id).delete()
         db.delete(order)
         db.commit()
+        
+        event_data = {
+            "event": "status_update",
+            "id": order_id,
+            "status": "Silindi"
+        }
     else:
         order.status = new_status
         db.commit()
 
-    items_summary = [{"name": i.product_name, "quantity": i.quantity, "price": i.price} for i in order.items] if new_status != "Silindi" else []
-    
-    event_data = {
-        "event": "status_update",
-        "id": order_id,
-        "table_no": order.table_no if new_status != "Silindi" else None,
-        "status": new_status,
-        "total_price": order.total_price if new_status != "Silindi" else 0,
-        "created_at": order.created_at.strftime("%H:%M") if new_status != "Silindi" else "",
-        "items": items_summary
-    }
+        items_summary = [{"name": i.product_name, "quantity": i.quantity, "price": i.price} for i in order.items]
+        
+        event_data = {
+            "event": "status_update",
+            "id": order.id,
+            "table_no": order.table_no,
+            "status": new_status,
+            "total_price": order.total_price,
+            "created_at": order.created_at.strftime("%H:%M"),
+            "items": items_summary
+        }
+
     await manager.broadcast(event_data)
 
     return {"status": "success", "new_status": new_status}
