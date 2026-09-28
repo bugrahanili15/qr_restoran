@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import shutil
-from sqlalchemy.orm import Session, joinedload
 
 from database import SessionLocal, Product, Order, OrderItem, User, Base, engine
 
@@ -175,7 +174,7 @@ def get_admin_panel(request: Request, db: Session = Depends(get_db)):
         context={"products": products, "user": user}
     )
 
-# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI (JINJA UYUMLU FİX) ---
+# --- GEÇMİŞ SİPARİŞLER RAPORU SAYFASI (JINJA UYUMLU KESİN ÇÖZÜM) ---
 @app.get("/admin/history")
 def get_order_history(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request)
@@ -183,11 +182,10 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
         return responses.RedirectResponse(url="/login")
 
     try:
-        # Tüm siparişleri eager loading ile çekiyoruz
-        history_orders = db.query(Order).options(joinedload(Order.items)).order_by(Order.id.desc()).all()
+        all_orders = db.query(Order).order_by(Order.id.desc()).all()
 
         grouped_dict = {}
-        for order in history_orders:
+        for order in all_orders:
             if order.created_at:
                 created_time = order.created_at + timedelta(hours=3)
                 date_str = created_time.strftime("%d.%m.%Y")
@@ -195,38 +193,39 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
             else:
                 date_str = "Tarihsiz Kayıtlar"
                 time_str = "--:--"
-            
+
             if date_str not in grouped_dict:
                 grouped_dict[date_str] = {
                     "date": date_str,
                     "orders": [],
                     "daily_total": 0.0
                 }
-            
-            items_list = []
-            if order.items:
-                for item in order.items:
-                    items_list.append({
-                        "product_name": item.product_name or "Ürün",
-                        "quantity": item.quantity or 1,
-                        "price": item.price or 0.0
-                    })
 
-            order_info = {
+            items_data = []
+            for item in order.items:
+                items_data.append({
+                    "product_name": item.product_name or "Ürün",
+                    "quantity": item.quantity or 1,
+                    "price": float(item.price or 0.0)
+                })
+
+            order_dict = {
                 "id": order.id,
                 "table_no": order.table_no,
                 "status": order.status or "İşlendi",
                 "total_price": float(order.total_price or 0.0),
                 "time_str": time_str,
-                "items": items_list
+                "order_items": items_data
             }
+
+            grouped_dict[date_str]["orders"].append(order_dict)
             
-            grouped_dict[date_str]["orders"].append(order_info)
-            if order.status in ["Tamamı Ödendi", "Teslim Edildi"]:
+            if order.status in ["Tamamı Ödendi", "Teslim Edildi", "Hazır", "Yeni"]:
                 grouped_dict[date_str]["daily_total"] += float(order.total_price or 0.0)
 
-        # Dictionary'i Jinja2 çakışmasını engellemek için doğrudan Listeye çeviriyoruz
-        history_list = list(grouped_dict.values())
+        history_list = []
+        for key in grouped_dict:
+            history_list.append(grouped_dict[key])
 
         return templates.TemplateResponse(
             request=request,
@@ -240,6 +239,7 @@ def get_order_history(request: Request, db: Session = Depends(get_db)):
             name="history.html",
             context={"history_list": [], "user": user, "error": str(e)}
         )
+
 @app.post("/admin/product/add")
 async def add_product(
     name: str = Form(...),
@@ -319,7 +319,6 @@ async def create_order(data: dict, db: Session = Depends(get_db)):
 
     total_price = sum(float(item["price"]) * int(item["quantity"]) for item in cart)
 
-    # Türkiye saati ile yeni sipariş
     now_tr = get_turkey_time().replace(tzinfo=None)
     new_order = Order(table_no=table_no, status="Yeni", total_price=total_price, created_at=now_tr)
     db.add(new_order)

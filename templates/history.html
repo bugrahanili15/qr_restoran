@@ -40,7 +40,7 @@
         {% endif %}
 
         <!-- Gün Gün Gruplanmış Geçmiş Siparişler -->
-        {% if history_list and history_list|length > 0 %}
+        {% if history_list %}
             {% for day_group in history_list %}
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4 mb-6">
                 <!-- Günlük Başlık ve Ciro Özeti -->
@@ -66,7 +66,7 @@
                             </div>
 
                             <ul class="space-y-1 mb-3">
-                                {% for item in order.items %}
+                                {% for item in order.order_items %}
                                 <li class="text-xs flex justify-between text-slate-300">
                                     <span>{{ item.product_name }}</span>
                                     <span class="font-bold text-slate-400">x{{ item.quantity }}</span>
